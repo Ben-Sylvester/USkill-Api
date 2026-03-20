@@ -1,1 +1,64 @@
-.venv
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+
+# ── Virtual environments ──────────────────────────────────────────
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# ── Secrets ───────────────────────────────────────────────────────
+# Never commit actual .env — only .env.example
+.env
+.env.local
+.env.*.local
+
+# ── Test & coverage ───────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+*.pytest_cache/
+
+# ── Type checkers ────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ── Linters ──────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Docker ───────────────────────────────────────────────────────
+.docker/
+
+# ── Alembic ──────────────────────────────────────────────────────
+# Do NOT ignore alembic/versions/ — migrations must be committed
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+logs/

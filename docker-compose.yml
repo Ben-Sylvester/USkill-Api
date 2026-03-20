@@ -1,0 +1,170 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────
+#  USKill Engine — local development stack
+#
+#  Services:
+#    postgres      — PostgreSQL 16 + pgvector
+#    redis         — Redis 7
+#    migrate       — runs `alembic upgrade head` once, then exits
+#    api           — FastAPI application (depends on migrate completing)
+#    worker        — background job + webhook-outbox worker
+#    pgadmin       — Postgres admin UI   (profile: dev)
+#    redisinsight  — Redis browser UI    (profile: dev)
+#
+#  Quick start:
+#    cp .env.example .env
+#    docker compose up -d
+#
+#  With dev tools:
+#    docker compose --profile dev up -d
+# ─────────────────────────────────────────────────────────────────────────
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://uskill:uskill@postgres:5432/uskill
+    REDIS_URL:    redis://redis:6379/0
+    APP_ENV:      development
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: uskill_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     uskill
+      POSTGRES_PASSWORD: uskill
+      POSTGRES_DB:       uskill
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uskill"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: uskill_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Migrations (init container — exits 0 on success) ────────────────
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate          # use the dedicated migrate stage
+    container_name: uskill_migrate
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://uskill:uskill@postgres:5432/uskill
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"              # must NOT restart — one-shot
+
+  # ── Application ─────────────────────────────────────────────────────
+
+  api:
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: uskill_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    volumes:
+      - ./app:/app/app:ro      # hot-reload in dev (remove in prod)
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/app
+        --loop uvloop
+
+  # ── Background worker ────────────────────────────────────────────────
+
+  worker:
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: uskill_worker
+    restart: unless-stopped
+    command: python scripts/worker.py
+    volumes:
+      - ./app:/app/app:ro
+      - ./scripts:/app/scripts:ro
+    healthcheck:
+      disable: true            # worker has no HTTP endpoint; monitored via logs
+
+  # ── Dev tools (start with: docker compose --profile dev up) ─────────
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: uskill_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:        admin@uskill.local
+      PGADMIN_DEFAULT_PASSWORD:     admin
+      PGADMIN_CONFIG_SERVER_MODE:   "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    profiles: [dev]
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: uskill_redisinsight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    depends_on:
+      - redis
+    profiles: [dev]
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+
+networks:
+  default:
+    name: uskill_network
